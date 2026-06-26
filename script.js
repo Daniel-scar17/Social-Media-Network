@@ -1,13 +1,13 @@
-import { db } from "./firebase.js";
 import { defaultSocialData } from "./data.js";
 import {
+    db,
     doc,
     getDoc,
     setDoc,
     deleteDoc,
     collection,
     getDocs
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+} from "./firebase.js";
 
 let socialData = {};
 let selectedNodeId = null;
@@ -39,19 +39,27 @@ const cy = cytoscape({
         },
         {
             selector:'edge[platform="Facebook"]',
-            style:{"line-color":"#1877F2"}
+            style:{
+                "line-color":"#1877F2"
+            }
         },
         {
             selector:'edge[platform="Instagram"]',
-            style:{"line-color":"#C13584"}
+            style:{
+                "line-color":"#C13584"
+            }
         },
         {
             selector:'edge[platform="TikTok"]',
-            style:{"line-color":"#000"}
+            style:{
+                "line-color":"#000"
+            }
         },
         {
             selector:'edge[platform="X"]',
-            style:{"line-color":"#777"}
+            style:{
+                "line-color":"#777"
+            }
         },
         {
             selector:"node.highlighted",
@@ -65,65 +73,78 @@ const cy = cytoscape({
 });
 
 function makeId(name){
-    return name.toLowerCase().trim().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"");
+    return name
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g,"_")
+        .replace(/^_|_$/g,"");
 }
 
-function cleanPersonName(name){
+function normalizePersonName(name){
     return name.trim();
+}
+
+function setStatus(message){
+    document.getElementById("details").innerHTML = `<span class="status">${message}</span>`;
 }
 
 async function loadAllData(){
     socialData = {};
-    const querySnapshot = await getDocs(collection(db,"socials"));
+    const snapshot = await getDocs(collection(db, "socials"));
 
-    querySnapshot.forEach(item=>{
-        socialData[item.id] = item.data().platforms || {};
+    snapshot.forEach(item => {
+        const data = item.data();
+        socialData[item.id] = data.platforms || {};
     });
 
     if(Object.keys(socialData).length === 0){
-        socialData = structuredClone(defaultSocialData);
-        await saveAllData(false);
+        await uploadDefaultData(false);
     }
 
     loadSocialFolders();
-    document.getElementById("details").innerHTML = "Search a person or open a saved social folder.";
+    setStatus("Search a person or open a saved social folder.");
+}
+
+async function uploadDefaultData(showAlert){
+    socialData = JSON.parse(JSON.stringify(defaultSocialData));
+    const people = Object.keys(socialData);
+
+    for(const person of people){
+        await setDoc(doc(db, "socials", person), {
+            platforms:socialData[person]
+        });
+    }
+
+    loadSocialFolders();
+
+    if(showAlert){
+        alert("Default data uploaded to Firebase.");
+    }
 }
 
 async function savePerson(person){
-    await setDoc(doc(db,"socials",person),{
+    await setDoc(doc(db, "socials", person), {
         platforms:socialData[person] || {}
     });
 }
 
-async function saveAllData(showAlert=true){
-    for(let person in socialData){
+async function saveData(showAlert = false){
+    const people = Object.keys(socialData);
+
+    for(const person of people){
         await savePerson(person);
     }
 
     loadSocialFolders();
 
     if(showAlert){
-        alert("Data saved online.");
-    }
-}
-
-function addToPlatform(person, platform, friend){
-    if(!socialData[person]){
-        socialData[person] = {};
-    }
-
-    if(!socialData[person][platform]){
-        socialData[person][platform] = [];
-    }
-
-    if(!socialData[person][platform].includes(friend)){
-        socialData[person][platform].push(friend);
+        alert("Data saved to Firebase.");
     }
 }
 
 async function addSocialConnection(){
-    const person = cleanPersonName(document.getElementById("mainPerson").value);
-    const friend = cleanPersonName(document.getElementById("connectedPerson").value);
+    const person = normalizePersonName(document.getElementById("mainPerson").value);
+    const friend = normalizePersonName(document.getElementById("connectedPerson").value);
     const platform = document.getElementById("platform").value;
 
     if(!person || !friend){
@@ -136,14 +157,38 @@ async function addSocialConnection(){
         return;
     }
 
-    addToPlatform(person, platform, friend);
-    addToPlatform(friend, platform, person);
+    const realPerson = findPersonKey(person) || person;
+    const realFriend = findPersonKey(friend) || friend;
 
-    await savePerson(person);
-    await savePerson(friend);
+    if(!socialData[realPerson]){
+        socialData[realPerson] = {};
+    }
 
-    currentPerson = person;
-    buildGraph(person);
+    if(!socialData[realFriend]){
+        socialData[realFriend] = {};
+    }
+
+    if(!socialData[realPerson][platform]){
+        socialData[realPerson][platform] = [];
+    }
+
+    if(!socialData[realFriend][platform]){
+        socialData[realFriend][platform] = [];
+    }
+
+    if(!socialData[realPerson][platform].includes(realFriend)){
+        socialData[realPerson][platform].push(realFriend);
+    }
+
+    if(!socialData[realFriend][platform].includes(realPerson)){
+        socialData[realFriend][platform].push(realPerson);
+    }
+
+    await savePerson(realPerson);
+    await savePerson(realFriend);
+
+    currentPerson = realPerson;
+    buildGraph(realPerson);
     loadSocialFolders();
 
     document.getElementById("mainPerson").value = "";
@@ -152,25 +197,28 @@ async function addSocialConnection(){
 
 function buildGraph(person){
     cy.elements().remove();
+    selectedNodeId = null;
 
     if(!socialData[person]){
-        document.getElementById("details").innerHTML = "No saved data for " + person;
+        setStatus("No saved data for " + person);
         return;
     }
 
     const nodes = new Map();
     const edges = [];
 
-    nodes.set(makeId(person),{
+    nodes.set(makeId(person), {
         data:{
             id:makeId(person),
             label:person
         }
     });
 
-    for(let platform in socialData[person]){
-        socialData[person][platform].forEach(friend=>{
-            nodes.set(makeId(friend),{
+    const platforms = socialData[person];
+
+    for(const platform in platforms){
+        platforms[platform].forEach(friend => {
+            nodes.set(makeId(friend), {
                 data:{
                     id:makeId(friend),
                     label:friend
@@ -179,7 +227,7 @@ function buildGraph(person){
 
             edges.push({
                 data:{
-                    id:makeId(person)+"_"+makeId(friend)+"_"+platform,
+                    id:makeId(person) + "_" + makeId(friend) + "_" + makeId(platform),
                     source:makeId(person),
                     target:makeId(friend),
                     platform:platform
@@ -188,7 +236,7 @@ function buildGraph(person){
         });
     }
 
-    cy.add([...nodes.values(),...edges]);
+    cy.add([...nodes.values(), ...edges]);
     applyVertexColoring();
 
     cy.layout({
@@ -201,20 +249,29 @@ function buildGraph(person){
 }
 
 function applyVertexColoring(){
-    const colors = ["#e74c3c", "#3498db", "#2ecc71", "#f1c40f", "#9b59b6", "#e67e22"];
+    const colors = [
+        "#e74c3c",
+        "#3498db",
+        "#2ecc71",
+        "#f1c40f",
+        "#9b59b6",
+        "#e67e22",
+        "#1abc9c",
+        "#34495e"
+    ];
 
-    cy.nodes().forEach(node=>{
-        let usedColors = [];
+    cy.nodes().forEach(node => {
+        const usedColors = [];
 
-        node.neighborhood("node").forEach(neighbor=>{
+        node.neighborhood("node").forEach(neighbor => {
             if(neighbor.data("color")){
                 usedColors.push(neighbor.data("color"));
             }
         });
 
-        for(let color of colors){
+        for(const color of colors){
             if(!usedColors.includes(color)){
-                node.data("color",color);
+                node.data("color", color);
                 break;
             }
         }
@@ -223,27 +280,33 @@ function applyVertexColoring(){
 
 function showDetails(person){
     if(!socialData[person]){
-        document.getElementById("details").innerHTML = "No saved data for " + person;
+        setStatus("No saved data for " + person);
         return;
     }
 
-    let total = 0;
+    let totalConnections = 0;
     let html = `<h3>${person}</h3>`;
 
-    for(let platform in socialData[person]){
-        total += socialData[person][platform].length;
+    for(const platform in socialData[person]){
+        totalConnections += socialData[person][platform].length;
     }
 
-    html += `Direct Connections: ${total}<hr>`;
+    html += `Direct Connections: ${totalConnections}<hr>`;
 
-    for(let platform in socialData[person]){
+    const platforms = socialData[person];
+
+    for(const platform in platforms){
         html += `<b>${platform}</b><br>`;
 
-        socialData[person][platform].forEach(friend=>{
+        if(platforms[platform].length === 0){
+            html += `<div>No connections</div>`;
+        }
+
+        platforms[platform].forEach(friend => {
             html += `
                 <div style="margin-bottom:10px;">
                     ${friend}<br>
-                    <button class="remove" onclick="removeConnection('${person}','${friend}','${platform}')">
+                    <button class="remove" data-person="${person}" data-friend="${friend}" data-platform="${platform}">
                         Remove Connection
                     </button>
                 </div>
@@ -254,11 +317,21 @@ function showDetails(person){
     }
 
     document.getElementById("details").innerHTML = html;
+
+    document.querySelectorAll(".remove").forEach(button => {
+        button.addEventListener("click", async () => {
+            await removeConnection(
+                button.dataset.person,
+                button.dataset.friend,
+                button.dataset.platform
+            );
+        });
+    });
 }
 
 async function removeConnection(person, friend, platform){
     if(socialData[person] && socialData[person][platform]){
-        socialData[person][platform] = socialData[person][platform].filter(name=>name !== friend);
+        socialData[person][platform] = socialData[person][platform].filter(name => name !== friend);
 
         if(socialData[person][platform].length === 0){
             delete socialData[person][platform];
@@ -266,7 +339,7 @@ async function removeConnection(person, friend, platform){
     }
 
     if(socialData[friend] && socialData[friend][platform]){
-        socialData[friend][platform] = socialData[friend][platform].filter(name=>name !== person);
+        socialData[friend][platform] = socialData[friend][platform].filter(name => name !== person);
 
         if(socialData[friend][platform].length === 0){
             delete socialData[friend][platform];
@@ -276,20 +349,13 @@ async function removeConnection(person, friend, platform){
     await savePerson(person);
     await savePerson(friend);
     buildGraph(person);
-    loadSocialFolders();
 }
 
-function findPersonByName(search){
-    for(let person in socialData){
-        if(person.toLowerCase() === search.toLowerCase()){
-            return person;
-        }
-    }
-
-    return null;
+function findPersonKey(search){
+    return Object.keys(socialData).find(person => person.toLowerCase() === search.toLowerCase()) || null;
 }
 
-function searchPerson(){
+async function searchPerson(){
     const search = document.getElementById("searchName").value.trim();
 
     if(!search){
@@ -297,11 +363,13 @@ function searchPerson(){
         return;
     }
 
-    const found = findPersonByName(search);
+    await loadAllData();
+
+    const found = findPersonKey(search);
 
     if(!found){
         cy.elements().remove();
-        document.getElementById("details").innerHTML = "Person not found: " + search;
+        setStatus("Person not found: " + search);
         return;
     }
 
@@ -335,7 +403,7 @@ function loadSocialFolders(){
     const folder = document.getElementById("socialFolder");
     folder.innerHTML = "";
 
-    Object.keys(socialData).sort().forEach(person=>{
+    Object.keys(socialData).sort().forEach(person => {
         const row = document.createElement("div");
         row.className = "folder-row";
 
@@ -372,44 +440,50 @@ async function deletePerson(person){
     }
 
     delete socialData[person];
-    await deleteDoc(doc(db,"socials",person));
+    await deleteDoc(doc(db, "socials", person));
 
-    for(let otherPerson in socialData){
-        for(let platform in socialData[otherPerson]){
-            socialData[otherPerson][platform] = socialData[otherPerson][platform].filter(name=>name !== person);
+    for(const otherPerson in socialData){
+        let changed = false;
+
+        for(const platform in socialData[otherPerson]){
+            const before = socialData[otherPerson][platform].length;
+            socialData[otherPerson][platform] = socialData[otherPerson][platform].filter(name => name !== person);
 
             if(socialData[otherPerson][platform].length === 0){
                 delete socialData[otherPerson][platform];
             }
+
+            if(before !== (socialData[otherPerson][platform]?.length || 0)){
+                changed = true;
+            }
         }
 
-        await savePerson(otherPerson);
+        if(changed){
+            await savePerson(otherPerson);
+        }
     }
 
     cy.elements().remove();
     loadSocialFolders();
-    document.getElementById("details").innerHTML = person + "'s socials deleted.";
+    setStatus(person + "'s socials deleted.");
 }
 
 async function resetData(){
-    const confirmReset = confirm("Reset all saved data and load the default people?");
+    const confirmReset = confirm("Reset all Firebase data and upload the default people?");
 
     if(!confirmReset){
         return;
     }
 
-    const querySnapshot = await getDocs(collection(db,"socials"));
+    const snapshot = await getDocs(collection(db, "socials"));
 
-    for(const item of querySnapshot.docs){
-        await deleteDoc(doc(db,"socials",item.id));
+    for(const item of snapshot.docs){
+        await deleteDoc(doc(db, "socials", item.id));
     }
 
-    socialData = structuredClone(defaultSocialData);
-    await saveAllData(false);
-
+    await uploadDefaultData(true);
     cy.elements().remove();
-    loadSocialFolders();
-    document.getElementById("details").innerHTML = "Default data loaded again.";
+    setStatus("Default data loaded again. Search a person or open a saved social folder.");
 }
 
 function clearSearchText(){
@@ -417,14 +491,14 @@ function clearSearchText(){
     document.getElementById("clearSearch").style.display = "none";
 }
 
-cy.on("tap","node",function(evt){
+cy.on("tap", "node", function(evt){
     const node = evt.target;
     const name = node.data("label");
 
     if(selectedNodeId === node.id()){
         cy.nodes().removeClass("highlighted");
         selectedNodeId = null;
-        document.getElementById("details").innerHTML = "Click a person to view connections.";
+        setStatus("Click a person to view connections.");
     }else{
         selectedNodeId = node.id();
         cy.nodes().removeClass("highlighted");
@@ -434,40 +508,42 @@ cy.on("tap","node",function(evt){
     }
 });
 
-cy.on("tap",function(evt){
+cy.on("tap", function(evt){
     if(evt.target === cy){
         cy.nodes().removeClass("highlighted");
         selectedNodeId = null;
     }
 });
 
-document.getElementById("searchName").addEventListener("input",function(){
+document.getElementById("searchBtn").addEventListener("click", searchPerson);
+document.getElementById("addBtn").addEventListener("click", addSocialConnection);
+document.getElementById("saveBtn").addEventListener("click", () => saveData(true));
+document.getElementById("resetBtn").addEventListener("click", resetData);
+document.getElementById("menuBtn").addEventListener("click", toggleMenu);
+document.getElementById("closeMenuBtn").addEventListener("click", closeMenu);
+document.getElementById("socialMain").addEventListener("click", toggleSocialFolder);
+document.getElementById("clearSearch").addEventListener("click", clearSearchText);
+
+document.getElementById("searchName").addEventListener("input", function(){
     document.getElementById("clearSearch").style.display = this.value.length > 0 ? "block" : "none";
 });
 
-document.getElementById("searchName").addEventListener("keydown",function(event){
+document.getElementById("searchName").addEventListener("keydown", function(event){
     if(event.key === "Enter"){
         searchPerson();
     }
 });
 
-document.getElementById("clearSearch").addEventListener("click",clearSearchText);
-document.getElementById("searchBtn").addEventListener("click",searchPerson);
-document.getElementById("addBtn").addEventListener("click",addSocialConnection);
-document.getElementById("saveBtn").addEventListener("click",()=>saveAllData(true));
-document.getElementById("resetBtn").addEventListener("click",resetData);
-document.getElementById("menuBtn").addEventListener("click",toggleMenu);
-document.getElementById("closeMenuBtn").addEventListener("click",closeMenu);
-document.getElementById("socialMain").addEventListener("click",toggleSocialFolder);
+loadAllData().catch(error => {
+    console.error(error);
+    setStatus("Firebase error. Check your Firestore rules and internet connection.");
+});
 
-window.removeConnection = removeConnection;
-window.clearSearchText = clearSearchText;
 window.searchPerson = searchPerson;
 window.addSocialConnection = addSocialConnection;
-window.saveData = saveAllData;
+window.saveData = saveData;
 window.resetData = resetData;
 window.toggleMenu = toggleMenu;
 window.closeMenu = closeMenu;
 window.toggleSocialFolder = toggleSocialFolder;
-
-loadAllData();
+window.clearSearchText = clearSearchText;

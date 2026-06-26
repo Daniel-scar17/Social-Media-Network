@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Media Network</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+</head>
+<body>
+
+    <h1>My Social Media Network</h1>
+
+    <div class="search-container">
+        <div class="search-box">
+            <input id="searchName" placeholder="Search name">
+            <button id="clearSearch">✕</button>
+        </div>
+        <button id="searchBtn">Search</button>
+    </div>
+
+    <div class="controls">
+        <input id="mainPerson" placeholder="Main Person">
+        <input id="connectedPerson" placeholder="Connected Person">
+
+        <select id="platform">
+            <option>Facebook</option>
+            <option>Instagram</option>
+            <option>TikTok</option>
+            <option>X</option>
+        </select>
+
+        <button id="addBtn">Add Connection</button>
+        <button id="saveBtn" class="save">Save</button>
+        <button id="resetBtn" class="reset">Reset Data</button>
+        <button id="menuBtn" class="menu-btn">☰</button>
+    </div>
+
+    <div id="sideMenu" class="side-menu">
+        <button id="closeMenuBtn" class="close-btn">✕</button>
+        <h3>Menu</h3>
+
+        <div id="socialMain" class="folder social-main">
+            <span>📁 Socials</span>
+            <span id="folderArrow">▶</span>
+        </div>
+
+        <div id="socialFolder" class="sub-folder"></div>
+    </div>
+
+    <div class="main">
+        <div id="cy"></div>
+        <div id="details">Loading database...</div>
+    </div>
+
+    <script type="module" src="script.js"></script>
+
+</body>
+</html>
